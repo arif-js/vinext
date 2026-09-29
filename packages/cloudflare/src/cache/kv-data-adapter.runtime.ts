@@ -102,9 +102,6 @@ type KVCacheEntry = {
 /** Prefix used by revalidatePath for path-based tags. */
 const PATH_TAG_PREFIX = "_N_T_";
 
-/** Max tag length to prevent KV key abuse. */
-const MAX_TAG_LENGTH = 256;
-
 /** The runtime rejects a lower `cacheTtl` with "Cache TTL must be at least 30". */
 const MIN_KV_CACHE_TTL_SECONDS = 30;
 
@@ -116,10 +113,11 @@ const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
  * Validate a cache tag. Returns null if invalid.
- * Colons are valid Next.js tags and remain part of the opaque KV key suffix.
+ * Tags may already be header-encoded, so their length is not the raw API tag
+ * length. The key builder bounds KV keys and safely handles colon tags.
  */
 function validateTag(tag: string): string | null {
-  if (typeof tag !== "string" || tag.length === 0 || tag.length > MAX_TAG_LENGTH) return null;
+  if (typeof tag !== "string" || tag.length === 0) return null;
   // Block control characters and backslashes.
   // Slash is allowed because revalidatePath() relies on pathname tags like
   // "/posts/hello" and "_N_T_/posts/hello".

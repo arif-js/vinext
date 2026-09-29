@@ -711,6 +711,49 @@ describe("KVCacheHandler", () => {
       status: 200,
     };
 
+    it.each(["cache:x", "__tag:posts"])(
+      "keeps colon tag %s isolated from another app sharing the KV namespace",
+      async (tag) => {
+        const otherApp = new KVCacheHandler(kv as any, { appPrefix: "__tag" });
+        await otherApp.set("x", pageValue, { tags: ["posts"] });
+        await handler.set("own", pageValue, { tags: [tag] });
+
+        await handler.revalidateTag(tag);
+
+        expect(await new KVCacheHandler(kv as any).get("own")).toBeNull();
+        expect(await new KVCacheHandler(kv as any, { appPrefix: "__tag" }).get("x")).not.toBeNull();
+      },
+    );
+
+    it("revalidates a public fetch with a multibyte colon tag after header encoding", async () => {
+      const { runWithFetchCache } = await import("../packages/vinext/src/shims/fetch-cache.js");
+      const tag = `${"é".repeat(100)}:posts`;
+      setCacheHandler(handler);
+      try {
+        await runWithFetchCache(async () => {
+          const response = await fetch("data:text/plain,cached", {
+            next: { tags: [tag], revalidate: 3600 },
+          });
+          expect(await response.text()).toBe("cached");
+        });
+        const entryKey = kv.put.mock.calls[0][0];
+        const logicalKey = entryKey.slice("cache:".length);
+        expect(await handler.get(logicalKey)).not.toBeNull();
+
+        await _runWithCacheState(async () => {
+          revalidateTag(tag, { expire: 0 });
+          await _drainPendingRevalidations();
+        });
+
+        expect(await new KVCacheHandler(kv as any).get(logicalKey)).toBeNull();
+        for (const [key] of kv.put.mock.calls) {
+          expect(new TextEncoder().encode(key).length).toBeLessThanOrEqual(512);
+        }
+      } finally {
+        setCacheHandler(new MemoryCacheHandler());
+      }
+    });
+
     // Adapted from Next.js's cache handler and public revalidateTag lifecycle tests:
     // https://github.com/vercel/next.js/blob/canary/test/unit/incremental-cache/file-system-cache.test.ts
     // https://github.com/vercel/next.js/blob/canary/test/e2e/app-dir/app-static/app-static.test.ts
@@ -741,7 +784,10 @@ describe("KVCacheHandler", () => {
           setCacheHandler(new MemoryCacheHandler());
         }
 
-        expect(store.get("__tag:emdash:posts")).toMatch(/^\d+$/);
+        expect(kv.put).toHaveBeenLastCalledWith(
+          expect.stringMatching(/^__tag:__hash:[0-9a-f]{16}$/),
+          expect.stringMatching(/^\d+$/),
+        );
         const reader = new KVCacheHandler(kv as any);
         expect(await reader.get("posts")).toBeNull();
         expect(await reader.get("unrelated")).not.toBeNull();
@@ -763,8 +809,7 @@ describe("KVCacheHandler", () => {
       await handler.set("emdash:posts", pageValue);
       const entry = store.get("cache:emdash:posts");
       await handler.revalidateTag([literalTag, "cache:emdash:posts", "__tag:emdash:posts"]);
-      expect(store.get("__tag:cache:emdash:posts")).toBe("1000");
-      expect(store.get("__tag:__tag:emdash:posts")).toBe("1000");
+      expect(new Set(kv.put.mock.calls.slice(-3).map(([key]) => key)).size).toBe(3);
       expect(kv.put.mock.calls.at(-3)![0]).not.toBe(hashedTagKey);
       expect(store.get("cache:emdash:posts")).toBe(entry);
       expect(await new KVCacheHandler(kv as any).get("literal")).toBeNull();
