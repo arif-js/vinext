@@ -116,16 +116,15 @@ const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
  * Validate a cache tag. Returns null if invalid.
- * Note: `:` is rejected because TAG_PREFIX and ENTRY_PREFIX use `:` as a
- * separator — allowing `:` in user tags could cause ambiguous key lookups.
+ * Colons are valid Next.js tags and remain part of the opaque KV key suffix.
  */
 function validateTag(tag: string): string | null {
   if (typeof tag !== "string" || tag.length === 0 || tag.length > MAX_TAG_LENGTH) return null;
-  // Block control characters and reserved separators used in our own key format.
+  // Block control characters and backslashes.
   // Slash is allowed because revalidatePath() relies on pathname tags like
   // "/posts/hello" and "_N_T_/posts/hello".
   // oxlint-disable-next-line no-control-regex -- intentional: reject control chars in tags
-  if (/[\x00-\x1f\\:]/.test(tag)) return null;
+  if (/[\x00-\x1f\\]/.test(tag)) return null;
   return tag;
 }
 
