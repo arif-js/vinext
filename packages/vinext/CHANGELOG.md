@@ -1,5 +1,37 @@
 # vinext
 
+## 1.0.1
+
+### Bug Fixes
+
+- **Plugins:** accept HTML comment end variants in request prescan (#3574)
+- **Dev:** pre-bundle use-sync-external-store in the App Router client (#3542)
+- **Tracing:** forward native Workers span metadata (#3564)
+- **Dev:** ignore generated .vinext files in the watcher (#3556)
+- **Init:** list Response Store deployment in next steps (#3536)
+
+### Performance
+
+#### Build
+
+- prefilter optimize-imports matcher on quoted package source (#3550)
+- skip unused sourcemaps in vinext source transforms (#3552)
+- avoid repeated realpath calls in middleware export validation (#3553)
+
+#### Misc
+
+- **App Router:** keep the route scanner out of the RSC runtime graph (#3557)
+- **Plugins:** skip parsing modules without rewritable dynamic requests (#3555)
+- **SSR:** stop loading browser runtime modules for shared helpers (#3559)
+- **Dev:** keep the App Router combined handler external in dev (#3548)
+- **SSR:** import the render abort check without server-only modules (#3549)
+
+### Contributors
+
+- @h-a-n-a
+- @james-elicx
+- @SammyTourani
+
 ## 1.0.0
 
 ### Features
