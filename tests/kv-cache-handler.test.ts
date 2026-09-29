@@ -725,14 +725,16 @@ describe("KVCacheHandler", () => {
       },
     );
 
-    it("revalidates a public fetch with a multibyte colon tag after header encoding", async () => {
+    it.each([
+      { label: "valid multibyte colon", tag: `${"é".repeat(100)}:posts`, valid: true },
+      { label: "oversized ASCII", tag: "a".repeat(257), valid: false },
+    ])("validates a public fetch's $label tag before encoding", async ({ tag, valid }) => {
       const { runWithFetchCache } = await import("../packages/vinext/src/shims/fetch-cache.js");
-      const tag = `${"é".repeat(100)}:posts`;
       setCacheHandler(handler);
       try {
         await runWithFetchCache(async () => {
           const response = await fetch("data:text/plain,cached", {
-            next: { tags: [tag], revalidate: 3600 },
+            next: { tags: [tag, null, undefined] as unknown as string[], revalidate: 3600 },
           });
           expect(await response.text()).toBe("cached");
         });
@@ -745,7 +747,9 @@ describe("KVCacheHandler", () => {
           await _drainPendingRevalidations();
         });
 
-        expect(await new KVCacheHandler(kv as any).get(logicalKey)).toBeNull();
+        const after = await new KVCacheHandler(kv as any).get(logicalKey);
+        if (valid) expect(after).toBeNull();
+        else expect(after).not.toBeNull();
         for (const [key] of kv.put.mock.calls) {
           expect(new TextEncoder().encode(key).length).toBeLessThanOrEqual(512);
         }
