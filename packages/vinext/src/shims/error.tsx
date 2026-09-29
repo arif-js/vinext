@@ -143,9 +143,9 @@ class ErrorComponent<P = {}> extends React.Component<P & ErrorProps> {
 export default ErrorComponent;
 
 // ---------------------------------------------------------------------------
-// unstable_catchError — App Router error-boundary HOC
+// catchError — App Router error-boundary HOC
 //
-// `unstable_catchError(fallback)` returns a Component that renders `children`
+// `catchError(fallback)` returns a Component that renders `children`
 // and, if the children throw, renders the user-supplied fallback with an
 // `ErrorInfo` object. Internal Next.js navigation signals (redirect /
 // notFound / forbidden / unauthorized) are rethrown so they reach the outer
@@ -160,22 +160,17 @@ export default ErrorComponent;
 //   - Bot-user-agent graceful-degradation, `handleHardNavError`, and
 //     `handleISRError` are not yet supported. Errors always render the
 //     fallback in non-bot contexts.
-//   - The single implementation runs in both react-server and client
-//     conditions. In Next.js, the react-server build exports a throwing stub
-//     because the API is documented as client-only. Here we let module
-//     evaluation succeed everywhere so `import { unstable_catchError } from
-//     'next/error'` does not break SSR-only bundles; misuse in a Server
-//     Component still fails at render time because React class components
-//     are unavailable in the react-server condition for this code path.
+//   - The react-server entry exports a client-only diagnostic stub.
 // ---------------------------------------------------------------------------
 
 export type ErrorInfo = {
-  error: Error;
+  error: unknown;
   reset: () => void;
+  retry: () => void;
   unstable_retry: () => void;
 };
 
-type _UserProps = Record<string, unknown>;
+type _UserProps = object;
 
 type _CatchErrorState = { thrownValue: unknown } | null;
 type _CatchErrorProps<P extends _UserProps> = {
@@ -206,7 +201,7 @@ class _CatchError<P extends _UserProps> extends React.Component<
 
   // Match Next.js's DevTools label so userland tooling/snapshots align.
   // https://github.com/vercel/next.js/blob/canary/packages/next/src/client/components/catch-error.tsx
-  static displayName = "unstable_catchError(Next.CatchError)";
+  static displayName = "catchError(Next.CatchError)";
 
   constructor(props: _CatchErrorProps<P>) {
     super(props);
@@ -245,17 +240,10 @@ class _CatchError<P extends _UserProps> extends React.Component<
     this.setState({ error: null });
   };
 
-  unstable_retry = (): void => {
-    // Pages Router has no segment-refresh primitive — Next.js documents
-    // `unstable_retry` as App Router only and throws this exact message
-    // from the boundary itself. Mirrors
-    // packages/next/src/client/components/catch-error.tsx and is asserted
-    // by `should throw when unstable_retry is called on Pages Router` in
-    // test/e2e/app-dir/catch-error/catch-error.test.ts.
-    //
+  retry = (): void => {
     if (this.props.isPagesRouter) {
       throw new Error(
-        "`unstable_retry()` can only be used in the App Router. Use `reset()` in the Pages Router.",
+        "`retry()` can only be used in the App Router. Use `reset()` in the Pages Router.",
       );
     }
     // Matches Next.js's App Router branch in
@@ -269,6 +257,16 @@ class _CatchError<P extends _UserProps> extends React.Component<
     });
   };
 
+  // Retain the pre-16.3 API and its diagnostic for existing applications.
+  unstable_retry = (): void => {
+    if (this.props.isPagesRouter) {
+      throw new Error(
+        "`unstable_retry()` can only be used in the App Router. Use `reset()` in the Pages Router.",
+      );
+    }
+    this.retry();
+  };
+
   render(): React.ReactNode {
     if (this.state.error) {
       const Fallback = this.props.fallback;
@@ -278,6 +276,7 @@ class _CatchError<P extends _UserProps> extends React.Component<
             ? this.state.error.thrownValue
             : new Error(String(this.state.error.thrownValue)),
         reset: this.reset,
+        retry: this.retry,
         unstable_retry: this.unstable_retry,
       };
       return React.createElement(Fallback, { props: this.props.props, errorInfo });
@@ -294,7 +293,7 @@ class _CatchError<P extends _UserProps> extends React.Component<
  * Ported from Next.js:
  *   https://github.com/vercel/next.js/blob/canary/packages/next/src/client/components/catch-error.tsx
  */
-export function unstable_catchError<P extends _UserProps>(
+export function catchError<P extends _UserProps>(
   fallback: (props: P, errorInfo: ErrorInfo) => React.ReactNode,
 ): React.ComponentType<P & { children?: React.ReactNode }> {
   const Fallback = ({ props, errorInfo }: { props: P; errorInfo: ErrorInfo }): React.ReactNode =>
@@ -321,10 +320,10 @@ export function unstable_catchError<P extends _UserProps>(
       children as React.ReactNode,
     );
   }
-  CatchErrorBoundary.displayName = `unstable_catchError(${fallback.name || "CatchErrorFallback"})`;
+  CatchErrorBoundary.displayName = `catchError(${fallback.name || "CatchErrorFallback"})`;
   return CatchErrorBoundary;
 }
 
 // Next.js stabilized this API in 16.3. Keep the unstable name for existing
 // vinext applications while exposing the current public name.
-export { unstable_catchError as catchError };
+export { catchError as unstable_catchError };

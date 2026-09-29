@@ -136,6 +136,36 @@ const invalidLink: LinkProps = {};
 void [metadata, config, image, link, font];
 `,
   );
+  if (!withNext) {
+    // Next.js 16.3 stable API, consumed through vinext/types without Next installed.
+    // https://github.com/vercel/next.js/blob/v16.3.6/packages/next/src/client/components/catch-error.tsx
+    await writeProjectFile(
+      root,
+      "app/error-boundary.ts",
+      `
+import ErrorPage, { catchError, unstable_catchError, type ErrorInfo, type ErrorProps } from "next/error";
+interface Props { title: string }
+const Boundary = catchError((props: Props, info: ErrorInfo) => {
+  info.retry();
+  info.unstable_retry();
+  info.reset();
+  return props.title;
+});
+const LegacyBoundary = unstable_catchError((props: Props, info: ErrorInfo) => {
+  info.unstable_retry();
+  return props.title;
+});
+const InferredBoundary = catchError((props: Props, info) => {
+  info.retry();
+  // @ts-expect-error retry does not accept arguments.
+  info.retry("unexpected");
+  return props.title;
+});
+const errorProps: ErrorProps = { statusCode: 500 };
+void [Boundary, LegacyBoundary, InferredBoundary, ErrorPage, errorProps];
+`,
+    );
+  }
   await writeProjectFile(root, "app/icon.png", "not-an-image");
   await generateRouteTypes({ root });
 
@@ -157,6 +187,7 @@ void [metadata, config, image, link, font];
       "es2022",
       path.join(root, "next-env.d.ts"),
       path.join(root, "app/page.ts"),
+      ...(!withNext ? [path.join(root, "app/error-boundary.ts")] : []),
     ],
     { cwd: root, encoding: "utf-8" },
   );
