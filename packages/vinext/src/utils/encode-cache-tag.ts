@@ -34,7 +34,7 @@ export function encodeCacheTag(tag: string): string {
     : tag;
 }
 
-/** Validate raw public tags before encoding, matching Next.js's validateTags. */
+/** Validate raw public tag types and lengths before header encoding. */
 export function encodeCacheTags(tags: readonly string[]): string[] {
   const encoded: string[] = [];
   for (const tag of tags) {
