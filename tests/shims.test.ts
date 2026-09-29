@@ -2044,13 +2044,13 @@ describe("next/navigation shim", () => {
 });
 
 // ---------------------------------------------------------------------------
-// next/error shim — unstable_catchError
+// next/error shim — catchError / unstable_catchError
 //
 // Ported from Next.js:
 //   https://github.com/vercel/next.js/blob/canary/packages/next/src/client/components/catch-error.tsx
 //   https://github.com/vercel/next.js/blob/canary/test/e2e/app-dir/catch-error/
 // ---------------------------------------------------------------------------
-describe("next/error shim — unstable_catchError", () => {
+describe("next/error shim — catchError / unstable_catchError", () => {
   // Ported from Next.js:
   // packages/next/src/api/error.react-server.ts
   // https://github.com/vercel/next.js/blob/v16.2.6/packages/next/src/api/error.react-server.ts
@@ -2066,6 +2066,16 @@ describe("next/error shim — unstable_catchError", () => {
   it("exports unstable_catchError as a function", async () => {
     const mod = await import("../packages/vinext/src/shims/error.js");
     expect(typeof mod.unstable_catchError).toBe("function");
+  });
+
+  // Ported from Next.js 16.3:
+  // https://github.com/vercel/next.js/blob/v16.3.6/packages/next/error.d.ts
+  it("exports catchError as the stable name in both module conditions", async () => {
+    const client = await import("../packages/vinext/src/shims/error.js");
+    const reactServer = await import("../packages/vinext/src/shims/error.react-server.js");
+
+    expect(client.catchError).toBe(client.unstable_catchError);
+    expect(reactServer.catchError).toBe(reactServer.unstable_catchError);
   });
 
   it("returns a Component that renders children when no error occurs", async () => {

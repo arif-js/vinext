@@ -5,9 +5,9 @@
  * Used by apps that import `import Error from 'next/error'` for
  * custom error handling in getServerSideProps or API routes.
  *
- * Also re-exports the unstable App Router error-boundary HOC
- * (`unstable_catchError`) and its `ErrorInfo` type, mirroring
- * `next/error`'s public surface.
+ * Also exports the App Router error-boundary HOC (`catchError`, plus its
+ * former unstable name) and its `ErrorInfo` type, mirroring `next/error`'s
+ * public surface.
  */
 import React from "react";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -324,3 +324,7 @@ export function unstable_catchError<P extends _UserProps>(
   CatchErrorBoundary.displayName = `unstable_catchError(${fallback.name || "CatchErrorFallback"})`;
   return CatchErrorBoundary;
 }
+
+// Next.js stabilized this API in 16.3. Keep the unstable name for existing
+// vinext applications while exposing the current public name.
+export { unstable_catchError as catchError };

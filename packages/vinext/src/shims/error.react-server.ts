@@ -7,3 +7,5 @@ export type ErrorInfo = {
 export function unstable_catchError(): never {
   throw new Error("`unstable_catchError` can only be used in Client Components.");
 }
+
+export { unstable_catchError as catchError };
