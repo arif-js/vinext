@@ -2199,8 +2199,15 @@ describe("next/error shim — catchError / unstable_catchError", () => {
     });
   });
 
-  // class-component lifecycle catches non-router errors and renders the fallback
-  it("class-component lifecycle catches non-router errors and renders the fallback", async () => {
+  // Ported from Next.js 16.3.6, including null/undefined thrown-value cases:
+  // https://github.com/vercel/next.js/blob/v16.3.6/test/e2e/app-dir/catch-error/catch-error.test.ts
+  it.each([
+    [new Error("boom"), "boom"],
+    ["thrown string", "thrown string"],
+    [{ message: "thrown object" }, "[object Object]"],
+    [null, "null"],
+    [undefined, "undefined"],
+  ])("passes the original thrown value %j to the fallback", async (thrown, message) => {
     // React 19's renderToStaticMarkup does NOT invoke error boundaries during
     // SSR — errors propagate up by design (boundaries only run during client
     // commit). To validate behavior without spinning up a real browser, we
@@ -2210,7 +2217,7 @@ describe("next/error shim — catchError / unstable_catchError", () => {
     // next render.
     const React = (await import("react")).default;
     const { renderToStaticMarkup } = await import("react-dom/server");
-    const { unstable_catchError } = await import("../packages/vinext/src/shims/error.js");
+    const { catchError } = await import("../packages/vinext/src/shims/error.js");
 
     const seenErrors: unknown[] = [];
     function Fallback({
@@ -2237,7 +2244,7 @@ describe("next/error shim — catchError / unstable_catchError", () => {
     // single props object per React.createElement semantics), matching
     // the internal wrapper shape rather than the public API signature
     // `(props: P, errorInfo: ErrorInfo) => React.ReactNode`.
-    const Boundary = unstable_catchError<{ title: string }>(Fallback as any);
+    const Boundary = catchError<{ title: string }>(Fallback as any);
 
     // The Boundary wrapper is a function component that calls hooks.
     // We must call it inside a React render so React's dispatcher is active.
@@ -2280,15 +2287,14 @@ describe("next/error shim — catchError / unstable_catchError", () => {
     // Before an error: children render untouched.
     expect(renderToStaticMarkup(instance.render() as React.ReactElement)).toContain("child");
 
-    // Simulate React calling getDerivedStateFromError with a thrown Error.
-    const thrown = new Error("boom");
+    // Simulate React capturing the thrown value, including non-Error objects.
     const derived = InnerCatchError.getDerivedStateFromError(thrown);
     expect(derived).toEqual({ error: { thrownValue: thrown } });
 
     // Feed the derived state into the instance and render the fallback.
     instance.state = derived as { error: { thrownValue: unknown } | null };
     const fallbackOutput = renderToStaticMarkup(instance.render() as React.ReactElement);
-    expect(fallbackOutput).toContain("boom");
+    expect(fallbackOutput).toContain(message);
     expect(fallbackOutput).toContain("hello-title");
     expect(seenErrors[seenErrors.length - 1]).toBe(thrown);
   });

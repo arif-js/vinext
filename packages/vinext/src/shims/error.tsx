@@ -271,10 +271,7 @@ class _CatchError<P extends _UserProps> extends React.Component<
     if (this.state.error) {
       const Fallback = this.props.fallback;
       const errorInfo: ErrorInfo = {
-        error:
-          this.state.error.thrownValue instanceof Error
-            ? this.state.error.thrownValue
-            : new Error(String(this.state.error.thrownValue)),
+        error: this.state.error.thrownValue,
         reset: this.reset,
         retry: this.retry,
         unstable_retry: this.unstable_retry,
