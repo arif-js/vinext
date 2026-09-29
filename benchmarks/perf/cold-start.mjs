@@ -70,9 +70,11 @@ async function clearDirectory(path) {
 function commandFor(port) {
   let command;
   if (framework === "vinext") {
-    // Run the checkout's own vite-plus, not a global `vp` whose version would be
-    // an unrecorded input to every sample.
-    const vpPath = join(projectDir, "node_modules/vite-plus/bin/vp");
+    // Run the checkout's own vite-plus entry, the one a global `vp` delegates
+    // to, so the global CLI version is not an unrecorded input to every sample.
+    // bin/vp would also enable Node's compile cache, which the base and head
+    // benchmark users cannot share.
+    const vpPath = join(projectDir, "node_modules/vite-plus/dist/bin.js");
     command = {
       command: globalThis.process.execPath,
       args: [vpPath, "dev", "--host", "127.0.0.1", "--port", String(port)],
