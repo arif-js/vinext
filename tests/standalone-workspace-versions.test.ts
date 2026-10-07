@@ -168,7 +168,9 @@ async function waitForHttp(url: string, child: ChildProcess, output: () => strin
       throw new Error(`Standalone server exited early:\n${output()}`);
     }
     try {
-      await fetch(url);
+      // Bound each probe so a server that accepts but never responds cannot
+      // stall the loop past its deadline.
+      await fetch(url, { signal: AbortSignal.timeout(2_000) });
       return;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 100));
