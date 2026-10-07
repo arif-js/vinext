@@ -208,7 +208,13 @@ function useStandaloneApp(nextConfig: Record<string, unknown>): StandaloneApp {
     tmpDirs.push(tmpDir);
     app.rootReactVersion = readVersion(path.join(appRoot, "node_modules/react/package.json"));
 
-    execFileSync(process.execPath, [CLI_PATH, "build"], { cwd: appRoot, stdio: "pipe" });
+    // execFileSync blocks the event loop, so the hook timeout cannot interrupt
+    // a hung build. Bound the subprocess itself.
+    execFileSync(process.execPath, [CLI_PATH, "build"], {
+      cwd: appRoot,
+      stdio: "pipe",
+      timeout: 150_000,
+    });
 
     // Run from outside the monorepo so a missing or wrong package cannot be
     // satisfied by apps/web/node_modules or the repo's node_modules.
@@ -241,6 +247,10 @@ function useStandaloneApp(nextConfig: Record<string, unknown>): StandaloneApp {
 describe("standalone output in a workspace where a package pins its own react", () => {
   const app = useStandaloneApp({});
 
+  it("bundles the workspace package into the server build", () => {
+    expect(fs.existsSync(path.join(app.standaloneDir, "node_modules/ws-ui"))).toBe(false);
+  });
+
   it("copies the app root's react to the top level", () => {
     expect(app.rootReactVersion).not.toBe(NESTED_REACT_VERSION);
     expect(readVersion(path.join(app.standaloneDir, "node_modules/react/package.json"))).toBe(
@@ -261,6 +271,12 @@ describe("standalone output in a workspace where a package pins its own react", 
 
 describe("standalone output with a server-external package that needs a nested dependency version", () => {
   const app = useStandaloneApp({ serverExternalPackages: ["ws-ui"] });
+
+  it("ships the workspace package as a standalone runtime dependency", () => {
+    expect(fs.existsSync(path.join(app.standaloneDir, "node_modules/ws-ui/package.json"))).toBe(
+      true,
+    );
+  });
 
   it("copies the app root's react to the top level", () => {
     expect(readVersion(path.join(app.standaloneDir, "node_modules/react/package.json"))).toBe(
