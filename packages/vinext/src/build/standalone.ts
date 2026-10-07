@@ -143,14 +143,7 @@ function copyPackageAndRuntimeDeps(
     if (!entry) continue;
     if (copied.has(entry.packageName)) continue;
 
-    // Resolve from the app root first. This walk dedupes by package name and
-    // keeps a single copy per package at the top level, so the root-resolved
-    // copy has to win: otherwise a dependency that pins a different version
-    // shadows the one the app itself imports, and a workspace app fails at
-    // runtime with an "Incompatible React versions" error.
-    const packageJsonPath =
-      resolvePackageJsonPath(entry.packageName, rootResolver) ??
-      resolvePackageJsonPath(entry.packageName, entry.resolver);
+    const packageJsonPath = resolvePackageJsonPath(entry.packageName, entry.resolver);
     if (!packageJsonPath) {
       if (entry.optional) {
         continue;
