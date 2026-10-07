@@ -29,6 +29,7 @@ import {
   VINEXT_MW_CTX_HEADER,
   VINEXT_PRERENDER_PAGES_STATIC_PATHS_PATH,
   VINEXT_PRERENDER_METADATA_ROUTES_PATH,
+  VINEXT_PRERENDER_REWRITTEN_HEADER,
   VINEXT_PRERENDER_ROUTE_PARAMS_HEADER,
   VINEXT_PRERENDER_SECRET_HEADER,
   VINEXT_PRERENDER_SPECULATIVE_HEADER,
@@ -82,7 +83,12 @@ import {
 import { normalizeRscRequest } from "./app-rsc-request-normalization.js";
 import { buildNextDataNotFoundResponse, normalizePagesDataRequest } from "./pages-data-route.js";
 import { normalizeDefaultLocalePathname } from "./pages-i18n.js";
-import { badRequestResponse, notFoundResponse } from "./http-error-responses.js";
+import {
+  badRequestResponse,
+  notFoundResponse,
+  notFoundStaticAssetResponse,
+} from "./http-error-responses.js";
+import { assetPrefixPathname, isNextStaticPath } from "../utils/asset-prefix.js";
 import {
   isOnDemandRevalidateRequest,
   PRERENDER_REVALIDATE_HEADER,
@@ -505,6 +511,7 @@ type NavigationContextValue = {
 };
 
 export type CreateAppRscHandlerOptions<TRoute extends AppRscHandlerRoute> = {
+  assetPrefix?: string;
   basePath: string;
   buildId: string | null;
   /**
@@ -808,7 +815,12 @@ async function handleAppRscRequest<TRoute extends AppRscHandlerRoute>(
       ...options.configRewrites.fallback,
       ...options.configHeaders,
     ].some((rule) => rule.basePath === false);
-  const normalized = normalizeRscRequest(request, options.basePath, canHandleOutsideBasePath);
+  const normalized = normalizeRscRequest(
+    request,
+    options.basePath,
+    canHandleOutsideBasePath,
+    options.assetPrefix,
+  );
   if (normalized instanceof Response) {
     if (
       request.headers.has(VINEXT_INTERCEPTION_CONTEXT_HEADER) ||
@@ -2017,22 +2029,30 @@ async function handleAppRscRequest<TRoute extends AppRscHandlerRoute>(
       );
     }
 
-    if (!pagesDataRequest || resolvedUrl === originalResolvedUrl) {
+    const isRewritten = resolvedUrl !== originalResolvedUrl;
+    const isPrerender = typeof process !== "undefined" && process.env?.VINEXT_PRERENDER === "1";
+    if ((!pagesDataRequest || !isRewritten) && !isPrerender) {
       return dispatchPagesResponseStage
         ? markAppRscResponseConfigHeadersApplied(response)
         : response;
     }
 
     const headers = new Headers(response.headers);
-    headers.set("x-nextjs-rewrite", resolvedUrl);
-    const rewrittenResponse = new Response(response.body, {
+    if (pagesDataRequest && isRewritten) headers.set("x-nextjs-rewrite", resolvedUrl);
+    if (isPrerender) {
+      // Mirrors the Pages pipeline: a build request can satisfy a
+      // request-conditional rewrite that real visitors may not, so only an
+      // unrewritten Pages render may become a snapshot.
+      headers.set(VINEXT_PRERENDER_REWRITTEN_HEADER, isRewritten ? "1" : "0");
+    }
+    const markedResponse = new Response(response.body, {
       headers,
       status: response.status,
       statusText: response.statusText,
     });
     return dispatchPagesResponseStage
-      ? markAppRscResponseConfigHeadersApplied(rewrittenResponse)
-      : rewrittenResponse;
+      ? markAppRscResponseConfigHeadersApplied(markedResponse)
+      : markedResponse;
   };
   const staticPagesFallbackResponse = await renderPagesForMatchKind("static");
   if (staticPagesFallbackResponse) {
@@ -2176,6 +2196,20 @@ async function handleAppRscRequest<TRoute extends AppRscHandlerRoute>(
     }
     bypassInterceptionContextCache = !hasVerifiedFinalInterceptionSource;
     setInterceptionResponseUncacheable(bypassInterceptionContextCache);
+  }
+
+  // Classify the resolved, unmatched path after middleware and rewrites.
+  // An explicit middleware/route 404 or a rewrite to a missing page keeps its
+  // own response, matching Next.js's router-server.ts static-asset fallback.
+  if (
+    (!filesystemRouteEligible || !match) &&
+    isNextStaticPath(cleanPathname, "", assetPrefixPathname(options.assetPrefix ?? ""))
+  ) {
+    options.clearRequestContext();
+    const headers = new Headers();
+    mergeMiddlewareResponseHeaders(headers, middlewareContext.headers);
+    applyCdnResponseHeaders(headers, { cacheControl: NEVER_CACHE_CONTROL });
+    return notFoundStaticAssetResponse(headers);
   }
 
   if (!filesystemRouteEligible) {
@@ -2565,13 +2599,16 @@ export function createAppRscRequestHandler<TRoute extends AppRscHandlerRoute>(
     // requestContextFromRequest() so the captured context never contains
     // attacker-controlled internal headers. This is the correct boundary
     // for pure App Router requests; in hybrid app+pages mode the connect
-    // handler already filtered headers upstream and x-vinext-mw-ctx
-    // (not in INTERNAL_HEADERS) carries the forwarded middleware context.
+    // handler already filtered headers upstream and x-vinext-mw-ctx carries
+    // the forwarded middleware context.
     // srvx's NodeRequestHeaders reads from rawHeaders for iteration but falls
     // back to req.headers for .get() / .has(). In the dev server we add
     // x-vinext-mw-ctx to req.headers after the Request is built, so it is
     // visible to .get() but lost when filterInternalHeaders iterates. Read it
     // BEFORE iterating so applyForwardedMiddlewareContext can skip middleware.
+    // Only that .get() value is trusted: the dev server deletes any client copy
+    // from req.headers on ingress, the Worker and production entries filter it,
+    // and filterInternalHeaders drops the copy still present in rawHeaders.
     const mwCtx = rawRequest.headers.get(VINEXT_MW_CTX_HEADER);
     const pagesDataUrl = new URL(rawRequest.url);
     const pagesDataInScope =

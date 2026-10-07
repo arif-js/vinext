@@ -1663,7 +1663,7 @@ describe("readPagesRouterEntrySource", () => {
     // handing the request to the middleware function, then delegates via
     // runPagesRequest.
     expect(content).toContain('typeof runMiddleware === "function"');
-    expect(content).toContain("wrapMiddlewareWithBasePath(runMiddleware, basePath, hadBasePath)");
+    expect(content).toContain("wrapMiddlewareWithBasePath(");
     expect(content).toContain("const dataNorm = normalizeDataRequest(request)");
     expect(content).toContain("isDataRequest: isDataReq");
     expect(content).toContain("runPagesRequest(request, deps)");
@@ -1863,7 +1863,7 @@ describe("readPagesRouterEntrySource", () => {
     // The worker returns result.response directly from the pipeline result.
     expect(content).toContain("runPagesRequest(request, deps)");
     expect(content).toContain('result.type === "response"');
-    expect(content).toContain("finalizeMissingStaticAssetResponse(result.response");
+    expect(content).toContain("let response = result.response;");
   });
 
   it("mergeHeaders preserves multiple Set-Cookie headers from both middleware and response", () => {
@@ -2015,9 +2015,7 @@ describe("readPagesRouterEntrySource", () => {
     // now called inside runPagesRequest. The worker delegates to the pipeline.
     expect(content).toContain("runPagesRequest(request, deps)");
     expect(content).toContain('result.type === "response"');
-    expect(content).toContain(
-      "finalizeMissingStaticAssetResponse(result.response, missingBuildAsset)",
-    );
+    expect(content).toContain("let response = result.response;");
   });
 
   it("finalizes only missing build-asset 404 responses", async () => {
@@ -2056,15 +2054,6 @@ describe("readPagesRouterEntrySource", () => {
 
     const regular404 = new Response("rendered 404", { status: 404 });
     expect(finalizeMissingStaticAssetResponse(regular404, false)).toBe(regular404);
-  });
-
-  it("finalizes missing build-asset 404s in both Node production routers", () => {
-    const content = fs.readFileSync(
-      path.join(import.meta.dirname, "../packages/vinext/src/server/prod-server.ts"),
-      "utf8",
-    );
-
-    expect(content.match(/finalizeMissingStaticAssetResponse\(/g)).toHaveLength(2);
   });
 
   it("resolveStaticAssetSignal fetches and merges static asset responses with middleware status", async () => {
@@ -2239,32 +2228,62 @@ describe("readPagesRouterEntrySource", () => {
 
   // Ported from Next.js: test/e2e/middleware-general/test/index.test.ts
   // https://github.com/vercel/next.js/blob/canary/test/e2e/middleware-general/test/index.test.ts
-  it("runs middleware before finalizing missing `_next/static/*` responses", () => {
+  it("delegates missing static-asset classification to the shared router", () => {
     const content = readPagesRouterEntrySource();
-    expect(content).toContain('from "./http-error-responses.js"');
-    expect(content).toContain('from "../utils/asset-prefix.js"');
-    expect(content).toContain("assetPrefixPathname(vinextConfig?.assetPrefix");
-    expect(content).toContain(
-      "const missingBuildAsset = isNextStaticPath(pathname, basePath, assetPathPrefix)",
-    );
-    expect(content).toContain(
-      "finalizeMissingStaticAssetResponse(result.response, missingBuildAsset)",
-    );
-
-    // Detection happens before routing, but the response is finalized only
-    // after runPagesRequest has given middleware a chance to handle the miss.
-    const staticPos = content.indexOf("isNextStaticPath(pathname, basePath, assetPathPrefix)");
-    const pipelinePos = content.indexOf("runPagesRequest(request, deps)");
-    const finalizePos = content.indexOf(
-      "finalizeMissingStaticAssetResponse(result.response, missingBuildAsset)",
-    );
-    expect(staticPos).toBeGreaterThan(-1);
-    expect(pipelinePos).toBeGreaterThan(staticPos);
-    expect(finalizePos).toBeGreaterThan(pipelinePos);
+    expect(content).toContain("assetPrefix: vinextConfig?.assetPrefix");
+    expect(content).toContain("runPagesRequest(request, deps)");
+    expect(content).toContain("let response = result.response;");
+    expect(content).not.toContain("finalizeMissingStaticAssetResponse");
   });
 });
 
 describe("fetchWorkerFilesystemRoute", () => {
+  // Like Next.js router-utils/filesystem.ts, rewrites resolve only public files
+  // and the build asset tree, not arbitrary files in the deployment binding.
+  it.each(["beforeFiles", "afterFiles", "fallback"] as const)(
+    "rejects private destinations and encoded traversal during %s",
+    async (phase) => {
+      const fetchAsset = vi.fn(async () => new Response("private"));
+      for (const pathname of [
+        "/_vinext/static-cache/index.json",
+        "/%5fvinext/static-cache/index.json",
+        "/_next/static/../../_vinext/static-cache/index.json",
+        "/_next/static/%2e%2e/%2e%2e/_vinext/static-cache/index.json",
+        "/_next/static/..%2f..%2f_vinext/static-cache/index.json",
+        "/_next/static/..%5c..%5c_vinext/static-cache/index.json",
+      ]) {
+        expect(
+          await fetchWorkerFilesystemRoute(
+            new Request("https://example.com/_next/static/original.js"),
+            pathname,
+            phase,
+            fetchAsset,
+            new Set(["/visible.txt"]),
+          ),
+        ).toBe(false);
+      }
+      expect(fetchAsset).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["beforeFiles", "afterFiles", "fallback"] as const)(
+    "allows rewritten build assets with basePath and assetPrefix during %s",
+    async (phase) => {
+      const fetchAsset = vi.fn(async () => new Response("built asset"));
+      expect(
+        await fetchWorkerFilesystemRoute(
+          new Request("https://example.com/source"),
+          "/docs/cdn/_next/static/app.js",
+          phase,
+          fetchAsset,
+          new Set(),
+          "/docs",
+          "/cdn",
+        ),
+      ).toBeInstanceOf(Response);
+    },
+  );
+
   it.each(["beforeFiles", "afterFiles", "fallback"] as const)(
     "fetches rewritten assets during %s",
     async (phase) => {
@@ -2279,6 +2298,7 @@ describe("fetchWorkerFilesystemRoute", () => {
         "/file.txt",
         phase,
         fetchAsset,
+        new Set(["/file.txt"]),
       );
 
       expect(result).toBeInstanceOf(Response);
@@ -2299,6 +2319,7 @@ describe("fetchWorkerFilesystemRoute", () => {
       "/missing.txt",
       "afterFiles",
       fetchAsset,
+      new Set(["/missing.txt"]),
     );
 
     expect(result).toBe(false);
@@ -2396,7 +2417,6 @@ describe("fetchWorkerFilesystemRoute", () => {
       "direct",
       fetchAsset,
       new Set(),
-      true,
     );
 
     expect(result).toBeInstanceOf(Response);
@@ -2412,6 +2432,7 @@ describe("fetchWorkerFilesystemRoute", () => {
         "/file.txt",
         "direct",
         fetchAsset,
+        new Set(["/file.txt"]),
       ),
     ).toBe(false);
     expect(
@@ -2420,6 +2441,7 @@ describe("fetchWorkerFilesystemRoute", () => {
         "/api/hello",
         "fallback",
         fetchAsset,
+        new Set(["/file.txt"]),
       ),
     ).toBe(false);
     expect(fetchAsset).not.toHaveBeenCalled();
@@ -3389,7 +3411,7 @@ describe("client asset sidecar generation", () => {
     });
 
     expect(source).toBe(
-      'export default {"clientEntry":"assets/entry.js","appBootstrapPreinitModules":["/assets/framework.js"],"ssrManifest":{"pages/index.tsx":["assets/page.js"]},"lazyChunks":["assets/lazy.js"],"dynamicPreloads":{"src/widget.tsx":["assets/widget.js"]}};\n',
+      'export default {"clientEntry":"assets/entry.js","appBootstrapPreinitModules":["/assets/framework.js"],"ssrManifest":{"pages/index.tsx":["assets/page.js"]},"lazyChunks":["assets/lazy.js"],"dynamicPreloads":{"src/widget.tsx":["assets/widget.js"]},"sharedChunks":[]};\n',
     );
   });
 
